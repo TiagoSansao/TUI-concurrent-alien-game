@@ -11,11 +11,21 @@ const unsigned int MIN_Y = 0;
 const unsigned int MAX_Y = 24;
 const unsigned int MIN_X = 0;
 const unsigned int MAX_X = 80;
-const unsigned int maxGameLoopIterations = 600; // 0.1s por iteração do game looop, ent 1 min de jogo
+const unsigned int alienSpawnIntervalMs = 3000;
+const unsigned int rocketPerformMovementIntervalMs = 100;
+const unsigned int gameLoopIntervalMs = 1;
+const unsigned int maxGameLoopIterations = 60000; // 60.000 * 10^(-3) = 60s
+unsigned int alienHeightDecrementationIntervalInMs = 1000;
 
 struct Rocket
 {
   int x, y, angle;
+};
+
+struct Alien
+{
+  int x;
+  int y;
 };
 
 unsigned int destroyed_aliens = 0;
@@ -26,6 +36,9 @@ pthread_mutex_t successful_aliens_lock;
 
 unordered_map<unsigned long, Rocket> globalRocketMap;
 pthread_mutex_t rocketsMapLock;
+
+unordered_map<unsigned long, Alien> globalAlienMap;
+pthread_mutex_t alienMapLock;
 
 enum Difficulty
 {
@@ -86,8 +99,7 @@ Difficulty parseGameDifficulty(int argc, char *argv[])
   return difficulty;
 }
 
-void *
-rocketThreadFunc(void *arg)
+void *rocketThreadFunc(void *arg)
 {
   pthread_t thread = pthread_self();
   const unsigned long threadId = (unsigned long)thread;
@@ -130,11 +142,42 @@ rocketThreadFunc(void *arg)
 
     if (!valid)
     {
+      pthread_mutex_lock(&rocketsMapLock);
+      globalRocketMap.erase(threadId);
+      pthread_mutex_unlock(&rocketsMapLock);
       return NULL;
     }
 
-    this_thread::sleep_for(chrono::seconds(1));
+    this_thread::sleep_for(chrono::milliseconds(rocketPerformMovementIntervalMs));
   }
+}
+
+void *alienThreadFunc(void *arg)
+{
+  pthread_t thread = pthread_self();
+  const unsigned long threadId = (unsigned long)thread;
+
+  int random_x = rand() % 41;
+
+  pthread_mutex_lock(&alienMapLock);
+  globalAlienMap[threadId] = {random_x, MIN_Y};
+  pthread_mutex_unlock(&alienMapLock);
+
+  while (globalAlienMap[threadId].y < MAX_Y)
+  {
+    globalAlienMap[threadId].y++;
+
+    this_thread::sleep_for(chrono::milliseconds(alienHeightDecrementationIntervalInMs));
+  }
+
+  pthread_mutex_lock(&alienMapLock);
+  pthread_mutex_lock(&successful_aliens_lock);
+
+  successful_aliens++;
+  globalAlienMap.erase(threadId);
+
+  pthread_mutex_unlock(&successful_aliens_lock);
+  pthread_mutex_unlock(&alienMapLock);
 }
 
 int main(int argc, char *argv[])
@@ -168,6 +211,13 @@ int main(int argc, char *argv[])
     clear();
     renderBaseElements(Krockets, 4, difficulty);
 
+    if (i % alienSpawnIntervalMs == 0)
+    {
+      pthread_t alienThread;
+      pthread_create(&alienThread, NULL, alienThreadFunc, NULL);
+      pthread_detach(alienThread);
+    }
+
     pthread_mutex_lock(&rocketsMapLock);
     for (const auto &pair : globalRocketMap)
     {
@@ -175,8 +225,15 @@ int main(int argc, char *argv[])
     }
     pthread_mutex_unlock(&rocketsMapLock);
 
+    pthread_mutex_lock(&alienMapLock);
+    for (const auto &pair : globalAlienMap)
+    {
+      mvprintw(pair.second.y, pair.second.x, "A");
+    }
+    pthread_mutex_unlock(&alienMapLock);
+
     refresh();
-    this_thread::sleep_for(chrono::milliseconds(100));
+    this_thread::sleep_for(chrono::milliseconds(gameLoopIntervalMs));
   }
 
   endwin();
