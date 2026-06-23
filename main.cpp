@@ -7,6 +7,7 @@
 
 using namespace std;
 
+// Game constants
 const unsigned int MIN_Y = 0;
 const unsigned int MAX_Y = 24;
 const unsigned int MIN_X = 0;
@@ -15,7 +16,11 @@ const unsigned int alienSpawnIntervalMs = 3000;
 const unsigned int rocketPerformMovementIntervalMs = 100;
 const unsigned int gameLoopIntervalMs = 1;
 const unsigned int maxGameLoopIterations = 60000; // 60.000 * 10^(-3) = 60s
-unsigned int alienHeightDecrementationIntervalInMs = 1000;
+
+// Game set-once parameters (no concurrency)
+unsigned int alienHeightDecrementationIntervalInMs;
+unsigned int maxRockets;
+unsigned int rocketRechargeIntervalInMs;
 
 struct Rocket
 {
@@ -63,7 +68,7 @@ std::string difficultyStringMapper(Difficulty difficulty)
   }
 }
 
-void renderBaseElements(int maxRockets, int rockets, Difficulty difficulty, int currentGameLoopIteration)
+void renderBaseElements(int rockets, Difficulty difficulty, int currentGameLoopIteration)
 {
   mvprintw(0, 0, "Foguetes: %d/%d |", rockets, maxRockets);
   mvprintw(0, 16, "Dificuldade: %s | ", difficultyStringMapper(difficulty).c_str());
@@ -223,6 +228,28 @@ void *alienThreadFunc(void *arg)
   pthread_mutex_unlock(&alienMapLock);
 }
 
+void adjustGameParameters(Difficulty difficulty)
+{
+  switch (difficulty)
+  {
+  case Difficulty::EASY:
+    alienHeightDecrementationIntervalInMs = 1000;
+    maxRockets = 10;
+    rocketRechargeIntervalInMs = 2000;
+    break;
+  case Difficulty::MEDIUM:
+    alienHeightDecrementationIntervalInMs = 500;
+    maxRockets = 5;
+    rocketRechargeIntervalInMs = 2000;
+    break;
+  case Difficulty::HARD:
+    alienHeightDecrementationIntervalInMs = 250;
+    maxRockets = 3;
+    rocketRechargeIntervalInMs = 2000;
+    break;
+  }
+}
+
 int main(int argc, char *argv[])
 {
   pthread_mutex_init(&destroyedAliensLock, NULL);
@@ -231,8 +258,7 @@ int main(int argc, char *argv[])
   pthread_mutex_init(&alienMapLock, NULL);
 
   Difficulty difficulty = parseGameDifficulty(argc, argv);
-  unsigned int Krockets = 5;
-  unsigned int rechargeTimeInSeconds = 1;
+  adjustGameParameters(difficulty);
 
   initscr();
   cbreak();
@@ -257,7 +283,7 @@ int main(int argc, char *argv[])
   for (int i = 0; i < maxGameLoopIterations; i++)
   {
     clear();
-    renderBaseElements(Krockets, 4, difficulty, i);
+    renderBaseElements(4, difficulty, i);
 
     if (i % alienSpawnIntervalMs == 0)
     {
