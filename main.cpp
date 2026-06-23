@@ -29,11 +29,11 @@ struct Alien
   bool destroyed;
 };
 
-unsigned int destroyed_aliens = 0;
-pthread_mutex_t destroyed_aliens_lock;
+unsigned int globalDestroyedAliens = 0;
+pthread_mutex_t destroyedAliensLock;
 
-unsigned int successful_aliens = 0;
-pthread_mutex_t successful_aliens_lock;
+unsigned int globalSuccessfullAliens = 0;
+pthread_mutex_t successfulAliensLock;
 
 unordered_map<unsigned long, Rocket> globalRocketMap;
 pthread_mutex_t rocketsMapLock;
@@ -67,8 +67,8 @@ void renderBaseElements(int maxRockets, int rockets, Difficulty difficulty, int 
 {
   mvprintw(0, 0, "Foguetes: %d/%d |", rockets, maxRockets);
   mvprintw(0, 16, "Dificuldade: %s | ", difficultyStringMapper(difficulty).c_str());
-  mvprintw(0, 40, "Kills: %d | ", destroyed_aliens);
-  mvprintw(0, 50, "Falhas: %d | ", successful_aliens);
+  mvprintw(0, 40, "Kills: %d | ", globalDestroyedAliens);
+  mvprintw(0, 50, "Falhas: %d | ", globalSuccessfullAliens);
   mvprintw(0, 63, "Tempo: %d/%d | ", currentGameLoopIteration / 1000, maxGameLoopIterations / 1000);
 
   mvprintw(23, 40, "|");
@@ -118,9 +118,9 @@ bool destroyAlienIfPossible(int x, int y)
       unsigned int alienThreadId = pair.first;
       globalAlienMap[alienThreadId].destroyed = true;
 
-      pthread_mutex_lock(&destroyed_aliens_lock);
-      destroyed_aliens++;
-      pthread_mutex_unlock(&destroyed_aliens_lock);
+      pthread_mutex_lock(&destroyedAliensLock);
+      globalDestroyedAliens++;
+      pthread_mutex_unlock(&destroyedAliensLock);
       break;
     }
   }
@@ -214,19 +214,21 @@ void *alienThreadFunc(void *arg)
   }
 
   pthread_mutex_lock(&alienMapLock);
-  pthread_mutex_lock(&successful_aliens_lock);
+  pthread_mutex_lock(&successfulAliensLock);
 
-  successful_aliens++;
+  globalSuccessfullAliens++;
   globalAlienMap.erase(threadId);
 
-  pthread_mutex_unlock(&successful_aliens_lock);
+  pthread_mutex_unlock(&successfulAliensLock);
   pthread_mutex_unlock(&alienMapLock);
 }
 
 int main(int argc, char *argv[])
 {
-  pthread_mutex_lock(&alienMapLock);
-  pthread_mutex_lock(&successful_aliens_lock);
+  pthread_mutex_init(&destroyedAliensLock, NULL);
+  pthread_mutex_init(&successfulAliensLock, NULL);
+  pthread_mutex_init(&rocketsMapLock, NULL);
+  pthread_mutex_init(&alienMapLock, NULL);
 
   Difficulty difficulty = parseGameDifficulty(argc, argv);
   unsigned int Krockets = 5;
