@@ -26,6 +26,7 @@ struct Alien
 {
   int x;
   int y;
+  bool destroyed;
 };
 
 unsigned int destroyed_aliens = 0;
@@ -62,10 +63,13 @@ std::string difficultyStringMapper(Difficulty difficulty)
   }
 }
 
-void renderBaseElements(int maxRockets, int rockets, Difficulty difficulty)
+void renderBaseElements(int maxRockets, int rockets, Difficulty difficulty, int currentGameLoopIteration)
 {
-  mvprintw(0, 0, "Foguetes: %d/%d", rockets, maxRockets);
-  mvprintw(0, 20, "Dificuldade: %s", difficultyStringMapper(difficulty).c_str());
+  mvprintw(0, 0, "Foguetes: %d/%d |", rockets, maxRockets);
+  mvprintw(0, 16, "Dificuldade: %s | ", difficultyStringMapper(difficulty).c_str());
+  mvprintw(0, 40, "Kills: %d | ", destroyed_aliens);
+  mvprintw(0, 50, "Falhas: %d | ", successful_aliens);
+  mvprintw(0, 63, "Tempo: %d/%d | ", currentGameLoopIteration / 1000, maxGameLoopIterations / 1000);
 
   mvprintw(23, 40, "|");
   mvprintw(24, 39, "[#]");
@@ -97,6 +101,33 @@ Difficulty parseGameDifficulty(int argc, char *argv[])
   }
 
   return difficulty;
+}
+
+bool destroyAlienIfPossible(int x, int y)
+{
+  bool alienDestroyed = false;
+
+  pthread_mutex_lock(&alienMapLock);
+
+  for (const auto &pair : globalAlienMap)
+  {
+    if (pair.second.destroyed)
+      continue;
+    if (pair.second.x == x && pair.second.y == y)
+    {
+      unsigned int alienThreadId = pair.first;
+      globalAlienMap[alienThreadId].destroyed = true;
+
+      pthread_mutex_lock(&destroyed_aliens_lock);
+      destroyed_aliens++;
+      pthread_mutex_unlock(&destroyed_aliens_lock);
+      break;
+    }
+  }
+
+  pthread_mutex_unlock(&alienMapLock);
+
+  return alienDestroyed;
 }
 
 void *rocketThreadFunc(void *arg)
@@ -131,6 +162,12 @@ void *rocketThreadFunc(void *arg)
       break;
     }
 
+    bool alienDestroyed = destroyAlienIfPossible(globalRocketMap[threadId].x, globalRocketMap[threadId].y);
+    if (alienDestroyed)
+    {
+      valid = false;
+    }
+
     if (globalRocketMap[threadId].x > MAX_X)
       valid = false;
     if (globalRocketMap[threadId].x < MIN_X)
@@ -140,16 +177,13 @@ void *rocketThreadFunc(void *arg)
     if (globalRocketMap[threadId].y < MIN_Y)
       valid = false;
 
-    if (!valid)
-    {
-      pthread_mutex_lock(&rocketsMapLock);
-      globalRocketMap.erase(threadId);
-      pthread_mutex_unlock(&rocketsMapLock);
-      return NULL;
-    }
-
     this_thread::sleep_for(chrono::milliseconds(rocketPerformMovementIntervalMs));
   }
+
+  pthread_mutex_lock(&rocketsMapLock);
+  globalRocketMap.erase(threadId);
+  pthread_mutex_unlock(&rocketsMapLock);
+  return NULL;
 }
 
 void *alienThreadFunc(void *arg)
@@ -165,6 +199,15 @@ void *alienThreadFunc(void *arg)
 
   while (globalAlienMap[threadId].y < MAX_Y)
   {
+    if (globalAlienMap[threadId].destroyed)
+    {
+      pthread_mutex_lock(&alienMapLock);
+      globalAlienMap.erase(threadId);
+      pthread_mutex_unlock(&alienMapLock);
+
+      return NULL;
+    }
+
     globalAlienMap[threadId].y++;
 
     this_thread::sleep_for(chrono::milliseconds(alienHeightDecrementationIntervalInMs));
@@ -182,6 +225,9 @@ void *alienThreadFunc(void *arg)
 
 int main(int argc, char *argv[])
 {
+  pthread_mutex_lock(&alienMapLock);
+  pthread_mutex_lock(&successful_aliens_lock);
+
   Difficulty difficulty = parseGameDifficulty(argc, argv);
   unsigned int Krockets = 5;
   unsigned int rechargeTimeInSeconds = 1;
@@ -209,7 +255,7 @@ int main(int argc, char *argv[])
   for (int i = 0; i < maxGameLoopIterations; i++)
   {
     clear();
-    renderBaseElements(Krockets, 4, difficulty);
+    renderBaseElements(Krockets, 4, difficulty, i);
 
     if (i % alienSpawnIntervalMs == 0)
     {
