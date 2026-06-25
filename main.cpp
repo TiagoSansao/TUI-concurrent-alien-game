@@ -378,6 +378,25 @@ void *rocketRechargerFunc(void *arg)
   }
 }
 
+void renderEndGameScreen()
+{
+  clear();
+
+  if (globalDestroyedAliens >= globalSuccessfullAliens)
+  {
+    mvprintw(0, 0, "Você venceu!");
+  }
+  else
+  {
+    mvprintw(0, 0, "Você perdeu!");
+  }
+
+  mvprintw(1, 0, "%d aliens mortos", globalDestroyedAliens);
+  mvprintw(2, 0, "%d aliens bem sucedidos", globalSuccessfullAliens);
+
+  refresh();
+}
+
 int main(int argc, char *argv[])
 {
   initMutexes();
@@ -404,6 +423,9 @@ int main(int argc, char *argv[])
     render(difficulty, i);
     this_thread::sleep_for(chrono::milliseconds(gameLoopIntervalMs));
   }
+
+  renderEndGameScreen();
+  this_thread::sleep_for(chrono::milliseconds(5000));
 
   endwin();
   return 0;
