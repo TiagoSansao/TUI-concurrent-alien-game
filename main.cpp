@@ -7,6 +7,26 @@
 
 using namespace std;
 
+// Struct and class declarations
+struct Rocket
+{
+  int x, y, angle;
+};
+
+struct Alien
+{
+  int x;
+  int y;
+  bool destroyed;
+};
+
+enum Difficulty
+{
+  EASY = 1,
+  MEDIUM = 2,
+  HARD = 3
+};
+
 // Game constants
 const unsigned int MIN_Y = 0;
 const unsigned int MAX_Y = 24;
@@ -22,23 +42,18 @@ unsigned int alienHeightDecrementationIntervalInMs;
 unsigned int maxRockets;
 unsigned int rocketRechargeIntervalInMs;
 
-struct Rocket
-{
-  int x, y, angle;
-};
+// Main thread global variable (no concurrency)
+int currentRocketThrowerDegree = 90;
 
-struct Alien
-{
-  int x;
-  int y;
-  bool destroyed;
-};
-
+// Global variables (seção crítica)
 unsigned int globalDestroyedAliens = 0;
 pthread_mutex_t destroyedAliensLock;
 
 unsigned int globalSuccessfullAliens = 0;
 pthread_mutex_t successfulAliensLock;
+
+unsigned int globalAvailableRockets;
+pthread_mutex_t availableRocketsLock;
 
 unordered_map<unsigned long, Rocket> globalRocketMap;
 pthread_mutex_t rocketsMapLock;
@@ -46,13 +61,7 @@ pthread_mutex_t rocketsMapLock;
 unordered_map<unsigned long, Alien> globalAlienMap;
 pthread_mutex_t alienMapLock;
 
-enum Difficulty
-{
-  EASY = 1,
-  MEDIUM = 2,
-  HARD = 3
-};
-
+// Game logic
 std::string difficultyStringMapper(Difficulty difficulty)
 {
   switch (difficulty)
@@ -68,15 +77,28 @@ std::string difficultyStringMapper(Difficulty difficulty)
   }
 }
 
-void renderHud(int rockets, Difficulty difficulty, int currentGameLoopIteration)
+void renderHud(Difficulty difficulty, int currentGameLoopIteration)
 {
-  mvprintw(0, 0, "Foguetes: %d/%d |", rockets, maxRockets);
+  mvprintw(0, 0, "Foguetes: %d/%d |", globalAvailableRockets, maxRockets);
   mvprintw(0, 16, "Dificuldade: %s | ", difficultyStringMapper(difficulty).c_str());
   mvprintw(0, 40, "Kills: %d | ", globalDestroyedAliens);
   mvprintw(0, 50, "Falhas: %d | ", globalSuccessfullAliens);
   mvprintw(0, 63, "Tempo: %d/%d | ", currentGameLoopIteration / 1000, maxGameLoopIterations / 1000);
 
-  mvprintw(23, 40, "|");
+  char directionSymbol[2];
+  if (currentRocketThrowerDegree == 0)
+    directionSymbol[0] = '<';
+  if (currentRocketThrowerDegree == 45)
+    directionSymbol[0] = '\\';
+  if (currentRocketThrowerDegree == 90)
+    directionSymbol[0] = '|';
+  if (currentRocketThrowerDegree == 135)
+    directionSymbol[0] = '/';
+  if (currentRocketThrowerDegree == 180)
+    directionSymbol[0] = '>';
+
+  directionSymbol[1] = '\0';
+  mvprintw(23, 40, directionSymbol);
   mvprintw(24, 39, "[#]");
 }
 
@@ -120,7 +142,7 @@ bool destroyAlienIfPossible(int x, int y)
       continue;
     if (pair.second.x == x && pair.second.y == y)
     {
-      unsigned int alienThreadId = pair.first;
+      unsigned long alienThreadId = pair.first;
       globalAlienMap[alienThreadId].destroyed = true;
 
       pthread_mutex_lock(&destroyedAliensLock);
@@ -140,7 +162,7 @@ void *rocketThreadFunc(void *arg)
   pthread_t thread = pthread_self();
   const unsigned long threadId = (unsigned long)thread;
   pthread_mutex_lock(&rocketsMapLock);
-  globalRocketMap[threadId] = {40, 23, 135};
+  globalRocketMap[threadId] = {40, 23, currentRocketThrowerDegree};
   pthread_mutex_unlock(&rocketsMapLock);
 
   bool valid = true;
@@ -230,30 +252,34 @@ void *alienThreadFunc(void *arg)
 
 void adjustGameParameters(Difficulty difficulty)
 {
+  pthread_mutex_lock(&availableRocketsLock);
+
   switch (difficulty)
   {
   case Difficulty::EASY:
     alienHeightDecrementationIntervalInMs = 1000;
-    maxRockets = 10;
+    globalAvailableRockets = maxRockets = 10;
     rocketRechargeIntervalInMs = 2000;
     break;
   case Difficulty::MEDIUM:
     alienHeightDecrementationIntervalInMs = 500;
-    maxRockets = 5;
+    globalAvailableRockets = maxRockets = 5;
     rocketRechargeIntervalInMs = 2000;
     break;
   case Difficulty::HARD:
     alienHeightDecrementationIntervalInMs = 250;
-    maxRockets = 3;
+    globalAvailableRockets = maxRockets = 3;
     rocketRechargeIntervalInMs = 2000;
     break;
   }
+
+  pthread_mutex_unlock(&availableRocketsLock);
 }
 
 void render(Difficulty difficulty, int gameLoopIteration)
 {
   clear();
-  renderHud(4, difficulty, gameLoopIteration);
+  renderHud(difficulty, gameLoopIteration);
 
   pthread_mutex_lock(&rocketsMapLock);
   for (const auto &pair : globalRocketMap)
@@ -279,15 +305,63 @@ void configureTuiOptions()
   noecho();
   keypad(stdscr, TRUE);
   nodelay(stdscr, TRUE);
-  curs_set(1);
+  curs_set(0);
 }
 
 void initMutexes()
 {
+  pthread_mutex_init(&availableRocketsLock, NULL);
   pthread_mutex_init(&destroyedAliensLock, NULL);
   pthread_mutex_init(&successfulAliensLock, NULL);
   pthread_mutex_init(&rocketsMapLock, NULL);
   pthread_mutex_init(&alienMapLock, NULL);
+}
+
+void processUserInput()
+{
+  int userInput = getch();
+  if (userInput == ERR) // err é o valor retornado se não tiver input
+    return;
+
+  switch (userInput)
+  {
+  case ' ':
+    pthread_mutex_lock(&availableRocketsLock);
+    if (globalAvailableRockets > 0)
+    {
+      pthread_t rocketThread;
+      pthread_create(&rocketThread, NULL, rocketThreadFunc, NULL);
+      pthread_detach(rocketThread);
+
+      globalAvailableRockets--;
+    }
+
+    pthread_mutex_unlock(&availableRocketsLock);
+
+    break;
+
+  case KEY_RIGHT:
+    if (currentRocketThrowerDegree == 90)
+      currentRocketThrowerDegree = 135;
+    else if (currentRocketThrowerDegree == 135)
+      currentRocketThrowerDegree = 180;
+    else if (currentRocketThrowerDegree == 45)
+      currentRocketThrowerDegree = 90;
+    else if (currentRocketThrowerDegree == 0)
+      currentRocketThrowerDegree = 45;
+    break;
+
+  case KEY_LEFT:
+    if (currentRocketThrowerDegree == 90)
+      currentRocketThrowerDegree = 45;
+    else if (currentRocketThrowerDegree == 45)
+      currentRocketThrowerDegree = 0;
+    else if (currentRocketThrowerDegree == 135)
+      currentRocketThrowerDegree = 90;
+    else if (currentRocketThrowerDegree == 180)
+      currentRocketThrowerDegree = 135;
+    break;
+  }
 }
 
 int main(int argc, char *argv[])
@@ -298,21 +372,10 @@ int main(int argc, char *argv[])
   Difficulty difficulty = parseGameDifficulty(argc, argv);
   adjustGameParameters(difficulty);
 
-  // for (int i = 22; i > 0; i--)
-  // {
-  //   if (i != 22)
-  //     mvprintw(i + 1, 40, " ");
-  //   mvprintw(i, 40, "o");
-  //   this_thread::sleep_for(chrono::seconds(1));
-  //   refresh();
-  // }
-
-  pthread_t rocketThread;
-  pthread_create(&rocketThread, NULL, rocketThreadFunc, NULL);
-  pthread_detach(rocketThread);
-
   for (int i = 0; i < maxGameLoopIterations; i++)
   {
+    processUserInput();
+
     if (i % alienSpawnIntervalMs == 0)
     {
       pthread_t alienThread;
