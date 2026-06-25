@@ -259,17 +259,17 @@ void adjustGameParameters(Difficulty difficulty)
   case Difficulty::EASY:
     alienHeightDecrementationIntervalInMs = 1000;
     globalAvailableRockets = maxRockets = 10;
-    rocketRechargeIntervalInMs = 2000;
+    rocketRechargeIntervalInMs = 500;
     break;
   case Difficulty::MEDIUM:
     alienHeightDecrementationIntervalInMs = 500;
     globalAvailableRockets = maxRockets = 5;
-    rocketRechargeIntervalInMs = 2000;
+    rocketRechargeIntervalInMs = 1000;
     break;
   case Difficulty::HARD:
     alienHeightDecrementationIntervalInMs = 250;
     globalAvailableRockets = maxRockets = 3;
-    rocketRechargeIntervalInMs = 2000;
+    rocketRechargeIntervalInMs = 1500;
     break;
   }
 
@@ -364,6 +364,20 @@ void processUserInput()
   }
 }
 
+void *rocketRechargerFunc(void *arg)
+{
+  while (true)
+  {
+    pthread_mutex_lock(&availableRocketsLock);
+
+    if (globalAvailableRockets < maxRockets)
+      globalAvailableRockets++;
+
+    pthread_mutex_unlock(&availableRocketsLock);
+    this_thread::sleep_for(chrono::milliseconds(rocketRechargeIntervalInMs));
+  }
+}
+
 int main(int argc, char *argv[])
 {
   initMutexes();
@@ -371,6 +385,10 @@ int main(int argc, char *argv[])
 
   Difficulty difficulty = parseGameDifficulty(argc, argv);
   adjustGameParameters(difficulty);
+
+  pthread_t rocketRechargerThread;
+  pthread_create(&rocketRechargerThread, NULL, rocketRechargerFunc, NULL);
+  pthread_detach(rocketRechargerThread);
 
   for (int i = 0; i < maxGameLoopIterations; i++)
   {
