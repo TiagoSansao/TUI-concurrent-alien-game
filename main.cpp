@@ -68,7 +68,7 @@ std::string difficultyStringMapper(Difficulty difficulty)
   }
 }
 
-void renderBaseElements(int rockets, Difficulty difficulty, int currentGameLoopIteration)
+void renderHud(int rockets, Difficulty difficulty, int currentGameLoopIteration)
 {
   mvprintw(0, 0, "Foguetes: %d/%d |", rockets, maxRockets);
   mvprintw(0, 16, "Dificuldade: %s | ", difficultyStringMapper(difficulty).c_str());
@@ -250,22 +250,53 @@ void adjustGameParameters(Difficulty difficulty)
   }
 }
 
-int main(int argc, char *argv[])
+void render(Difficulty difficulty, int gameLoopIteration)
 {
-  pthread_mutex_init(&destroyedAliensLock, NULL);
-  pthread_mutex_init(&successfulAliensLock, NULL);
-  pthread_mutex_init(&rocketsMapLock, NULL);
-  pthread_mutex_init(&alienMapLock, NULL);
+  clear();
+  renderHud(4, difficulty, gameLoopIteration);
 
-  Difficulty difficulty = parseGameDifficulty(argc, argv);
-  adjustGameParameters(difficulty);
+  pthread_mutex_lock(&rocketsMapLock);
+  for (const auto &pair : globalRocketMap)
+  {
+    mvprintw(pair.second.y, pair.second.x, "o");
+  }
+  pthread_mutex_unlock(&rocketsMapLock);
 
+  pthread_mutex_lock(&alienMapLock);
+  for (const auto &pair : globalAlienMap)
+  {
+    mvprintw(pair.second.y, pair.second.x, "A");
+  }
+  pthread_mutex_unlock(&alienMapLock);
+
+  refresh();
+}
+
+void configureTuiOptions()
+{
   initscr();
   cbreak();
   noecho();
   keypad(stdscr, TRUE);
   nodelay(stdscr, TRUE);
-  curs_set(1); // depois colocar 0 pra n aparecer o cursor no terminal
+  curs_set(1);
+}
+
+void initMutexes()
+{
+  pthread_mutex_init(&destroyedAliensLock, NULL);
+  pthread_mutex_init(&successfulAliensLock, NULL);
+  pthread_mutex_init(&rocketsMapLock, NULL);
+  pthread_mutex_init(&alienMapLock, NULL);
+}
+
+int main(int argc, char *argv[])
+{
+  initMutexes();
+  configureTuiOptions();
+
+  Difficulty difficulty = parseGameDifficulty(argc, argv);
+  adjustGameParameters(difficulty);
 
   // for (int i = 22; i > 0; i--)
   // {
@@ -282,9 +313,6 @@ int main(int argc, char *argv[])
 
   for (int i = 0; i < maxGameLoopIterations; i++)
   {
-    clear();
-    renderBaseElements(4, difficulty, i);
-
     if (i % alienSpawnIntervalMs == 0)
     {
       pthread_t alienThread;
@@ -292,21 +320,7 @@ int main(int argc, char *argv[])
       pthread_detach(alienThread);
     }
 
-    pthread_mutex_lock(&rocketsMapLock);
-    for (const auto &pair : globalRocketMap)
-    {
-      mvprintw(pair.second.y, pair.second.x, "o");
-    }
-    pthread_mutex_unlock(&rocketsMapLock);
-
-    pthread_mutex_lock(&alienMapLock);
-    for (const auto &pair : globalAlienMap)
-    {
-      mvprintw(pair.second.y, pair.second.x, "A");
-    }
-    pthread_mutex_unlock(&alienMapLock);
-
-    refresh();
+    render(difficulty, i);
     this_thread::sleep_for(chrono::milliseconds(gameLoopIntervalMs));
   }
 
